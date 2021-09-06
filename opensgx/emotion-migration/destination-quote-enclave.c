@@ -46,7 +46,7 @@ int emotion_sgx_remote_attest_quote(int target_port)
     rsa_N       = malloc(sizeof(mpi));
     rsa_E       = malloc(sizeof(mpi));
 
-    printf("Listening to ME on %d ...",target_port);
+    printf("Listening to source ME on %d ...",target_port);
     client_fd = sgx_make_server(target_port);
     if(client_fd < 0) {
         puts("sgx_make_server error\n");
@@ -59,7 +59,7 @@ int emotion_sgx_remote_attest_quote(int target_port)
         puts("sgx_get_report error\n");
         goto failed;
     }
-    puts("Received REPORT from ME");
+    puts("Received REPORT from source ME");
     
     //Get Report key from QEMU
     keyreq.keyname = REPORT_KEY;

@@ -370,7 +370,7 @@ int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
     }
     
     //msg1 has already been generated
-    puts("Generating msg1 ...\n");
+    puts("Generating msg1 ...");
     //Get ME data from host ME
     puts("Receiving host ME data ...");
     memset(read_buf, 0, 512);
@@ -394,9 +394,9 @@ int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
     puts("Got SIGSTRUCT!\n");
 
 
-     puts("Generating REPORT for msg1 ...\n"); 
+     puts("Generating REPORT for msg1 ..."); 
     
-    puts("Sending request of REPORT for msg1 ...\n");
+    puts("Sending request of REPORT for msg1 ...");
      //EREPORT with sigstruct
     memcpy(&targetinfo.measurement, &sigstruct->enclaveHash, 32);
     memcpy(&targetinfo.attributes, &sigstruct->attributes, 16);
@@ -450,16 +450,16 @@ int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
         puts("sgx_read_sock error\n");
         goto failed;
     }
-    puts("Received rsa_E from Quoting enclave\n");
+    puts("Received rsa_E from Quoting enclave");
     
     //Receive QUOTE
     memset(&quote, 0, sizeof(quote));
     if(sgx_get_report(quote_fd, &quote) < 0) {
         goto failed;
     }
-    puts("Received QUOTE from Quoting enclave\n");
+    puts("Received QUOTE from Quoting enclave");
 
-    //send to challenger
+    //send to host ME
     puts("Sending RSA & QUOTE to host ME\n");
     if(sgx_write_sock(client_fd, rsa_N, sizeof(mpi)) < 0) {
         puts("sgx_write_sock error\n");
@@ -477,10 +477,106 @@ int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
 
     close(quote_fd);
     close(client_fd);
-    puts("Target enclave end\n");
+    puts("Target enclave end");
     return 1;
 failed:
     close(quote_fd);
+    close(client_fd);
+    return -1;
+}
+
+int emotion_sgx_remote_attest_quote(int target_port)
+{
+    report_t report;
+    report_t report_send;
+    targetinfo_t targetinfo;
+    unsigned char nonce[64];
+    char read_buf[512];
+    int client_fd;    
+    keyrequest_t keyreq;
+    unsigned char report_key[DEVICE_KEY_LENGTH];
+    const char *pers = "rsa_genkey";
+    unsigned char *rsa_N, *rsa_E;
+    
+    rsa_N       = malloc(sizeof(mpi));
+    rsa_E       = malloc(sizeof(mpi));
+
+    printf("Listening to source ME on %d ...\n",target_port);
+    client_fd = sgx_make_server(target_port);
+    if(client_fd < 0) {
+        puts("sgx_make_server error\n");
+        return -1;
+    }
+    puts("Target enclave accepted");
+      
+    //Get REPORT from Target enclave
+    if(sgx_get_report(client_fd, &report) < 0) {
+        puts("sgx_get_report error\n");
+        goto failed;
+    }
+    puts("Received REPORT from source ME");
+    
+    //Get Report key from QEMU
+    keyreq.keyname = REPORT_KEY;
+    memcpy(&keyreq.keyid, &report.keyid, 16);
+    memcpy(&keyreq.miscmask, &report.miscselect, 4);    
+    sgx_getkey(&keyreq, report_key);
+    puts("Received Report Key");
+
+    //Check MAC matching
+    if(sgx_match_mac(report_key, &report) < 0) {
+        puts("Mac not match!\n");
+        goto failed;
+    }
+    puts("MAC match, PASS!");
+
+    //EREPORT with given report
+    puts("Sending REPORT to Target enclave ...");
+    memcpy(&targetinfo.measurement, &report.mrenclave, 32);
+    memcpy(&targetinfo.attributes, &report.attributes, 16);
+    memcpy(&targetinfo.miscselect, &report.miscselect, 4);
+    sgx_report(&targetinfo, nonce, &report_send);
+    if(sgx_write_sock(client_fd, &report_send, sizeof(report_t)) < 0) {
+        puts("sgx_write_sock error\n");
+        goto failed;
+    }
+    
+    //Get intra attestation result of Target enclave
+    memset(read_buf, 0, sizeof(read_buf));
+    if(sgx_read_sock(client_fd, read_buf, sizeof(read_buf)) <= 0) {
+        puts("sgx_read_sock error\n");
+        goto failed;
+    }
+    printf("Target enclave msg: %s\n", read_buf);
+    if(strcmp(read_buf, "Good") != 0) {
+        puts("Target enclave denied");
+        goto failed;
+    }
+    puts("REPORT verification succeed!");
+
+
+    puts("Generating QUOTE ...");
+    //Make RSA & QUOTE
+    sgx_make_quote(pers, &report, rsa_N, rsa_E);
+
+    //Send quote
+    if(sgx_write_sock(client_fd, rsa_N, sizeof(mpi)) < 0) {
+        puts("sgx_write_sock error\n");
+        goto failed;
+    }
+    if(sgx_write_sock(client_fd, rsa_E, sizeof(mpi)) < 0) {
+        puts("sgx_write_sock error\n");
+        goto failed;
+    }
+    if(sgx_write_sock(client_fd, &report, sizeof(report_t)) < 0) {
+        puts("sgx_write_sock error\n");
+        goto failed;
+    }
+    
+    close(client_fd);
+    puts("Quoting enclave end");
+    return 1;
+failed:
     close(client_fd);
     return -1;
 }
