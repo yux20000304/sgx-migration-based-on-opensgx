@@ -21,7 +21,7 @@ void enclave_main()
     char *conf = "./destination-quote-enclave.conf";
     char *msg1="this is destination migration enclave";
 
-    ret = emotion_sgx_remote_attest_me(listen_port, quote_port, conf);
+    ret = destination_emotion_sgx_remote_attest_me(listen_port, quote_port, conf, msg1);
     if(ret == 1) {
         puts("Remote Attestaion Success!");
     } else {

@@ -337,7 +337,7 @@ failed:
 }
 
 
-int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
+int destination_emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf, char *msg1)
 {
     // Quoting enclave in same platform
     const char *quote_ip = "127.0.0.1";
@@ -371,14 +371,7 @@ int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
     
     //msg1 has already been generated
     puts("Generating msg1 ...");
-    //Get ME data from host ME
-    puts("Receiving host ME data ...");
-    memset(read_buf, 0, 512);
-    if (sgx_read_sock(client_fd, read_buf, 512) <= 0) {
-        puts("sgx_read_sock error\n");
-        return -1;
-    }
-    printf("Challeger msg: %s\n", read_buf);
+
     
     //Connect to Quoting enclave
     printf("Connecting to QE on %d ...\n",quote_port);
@@ -460,7 +453,7 @@ int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
     puts("Received QUOTE from Quoting enclave");
 
     //send to host ME
-    puts("Sending RSA & QUOTE to host ME\n");
+    puts("Sending RSA & QUOTE & msg1 to host ME\n");
     if(sgx_write_sock(client_fd, rsa_N, sizeof(mpi)) < 0) {
         puts("sgx_write_sock error\n");
         goto failed;
@@ -472,6 +465,9 @@ int emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf)
     if(sgx_write_sock(client_fd, &quote, sizeof(report_t)) < 0) {
         puts("sgx_write_sock error\n");
         goto failed;
+    }
+    if(sgx_write_sock(client_fd,&msg1, strlen(msg1)) < 0){
+        puts("sgx_write_sock error\n");
     }
 
 
@@ -572,6 +568,7 @@ int emotion_sgx_remote_attest_quote(int target_port)
         puts("sgx_write_sock error\n");
         goto failed;
     }
+
     
     close(client_fd);
     puts("Quoting enclave end");
@@ -580,3 +577,84 @@ failed:
     close(client_fd);
     return -1;
 }
+
+
+int emotion_sgx_remote_attest_challenger(const char *target_ip, int target_port)
+{
+    //Network information of Target enclave
+    int target_fd;
+    report_t quote;
+    unsigned char *rsa_N, *rsa_E;
+    char msg1[512];
+    rsa_context rsa;
+    unsigned char hash[32], sign[32];
+
+    rsa_N = malloc(sizeof(mpi));
+    rsa_E = malloc(sizeof(mpi));
+    msg1 = malloc(sizeof(unsigned char));
+        
+    //Connect to Target enclave
+    puts("Connecting to destination ME on 8025 ...");
+    target_fd = sgx_connect_server(target_ip, target_port);
+    if(target_fd < 0) {
+        puts("sgx_connect_server error\n");
+        return -1;
+    }
+    puts("Destination ME connected!");
+    
+
+    puts("Waiting for RSA key,msg1 and QUOTE ...");
+    //Receive rsa_N
+    memset(rsa_N, 0, sizeof(mpi));
+    if(sgx_read_sock(target_fd, rsa_N, sizeof(mpi)) <= 0) {
+        puts("sgx_read_sock error\n");
+        goto failed;
+    }
+    puts("Received rsa_N from destination ME");
+
+    //Receive rsa_E
+    memset(rsa_E, 0, sizeof(mpi));
+    if(sgx_read_sock(target_fd, rsa_E, sizeof(mpi)) <= 0) {
+        puts("sgx_read_sock error\n");
+        goto failed;
+    }
+    puts("Received rsa_E from destination ME");
+    
+    //Receive QUOTE
+    memset(&quote, 0, sizeof(quote));
+    if(sgx_get_report(target_fd, &quote) < 0) {
+        puts("sgx_get_report error\n");
+        goto failed;
+    }
+    puts("Received QUOTE from destination ME");
+
+    //Receive msg1
+   memset(msg1, 0, sizeof(msg1));
+    if(sgx_read_sock(client_fd, msg1, sizeof(msg1)) <= 0) {
+        puts("sgx_read_sock error\n");
+        goto failed;
+    }
+    puts("Receive msg1 from destination ME");
+
+    
+    //Verify QUOTE
+    mpi_read_binary(&rsa.N, rsa_N, sizeof(mpi));
+    mpi_read_binary(&rsa.E, rsa_E, sizeof(mpi));
+    rsa.len = (mpi_msb(&rsa.N)+7)>>3;
+    sha256((unsigned char *)&quote, sizeof(report_t), hash, 0);
+    memcpy(sign, &quote.mac, 16);
+    
+    if(rsa_pkcs1_verify(&rsa, NULL, NULL, RSA_PUBLIC,
+            POLARSSL_MD_NONE, 0, hash, sign) != 0) {
+        puts("Failed to verify!\n");
+        close(target_fd);
+        goto failed;
+    }
+    puts("Verify Success!");
+
+    return 1;
+failed:
+    close(target_fd);
+    return -1;
+}
+
