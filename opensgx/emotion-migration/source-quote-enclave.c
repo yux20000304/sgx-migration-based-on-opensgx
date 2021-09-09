@@ -18,9 +18,9 @@
 
 void enclave_main()
 {
-    int target_port = 8026, ret;
+     int target_port = 8026, ret;       //listening destination ME on 8026 port
 
-    ret = sgx_remote_attest_quote(target_port);
+    ret = emotion_sgx_remote_attest_quote(target_port);
     if(ret == 1) {
         puts("Remote Attestaion Success!");
     } else {

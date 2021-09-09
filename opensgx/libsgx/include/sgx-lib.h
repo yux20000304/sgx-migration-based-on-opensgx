@@ -92,3 +92,4 @@ extern int sgx_remote_attest_target(int challenger_port, int quote_port, char *c
 extern int sgx_remote_attest_quote(int target_port);
 extern int destination_emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf, char *msg1);
 extern int emotion_sgx_remote_attest_quote(int target_port);
+extern int source_emotion_sgx_remote_attest_me(int listen_port, int quote_port, char *conf, char *msg2);
